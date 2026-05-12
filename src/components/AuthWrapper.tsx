@@ -1,15 +1,31 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { AppUser } from '../types';
-import { LogIn, Sparkles } from 'lucide-react';
+import { LogIn, Mail, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function AuthWrapper({ children }: { children: (user: AppUser) => React.ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestMode, setGuestMode] = useState(false);
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    // When a magic link expires or fails, GoTrue redirects back with
+    // #error=...&error_description=... in the hash. Surface it.
+    if (window.location.hash.includes('error')) {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const desc = params.get('error_description');
+      if (desc) {
+        setAuthError(decodeURIComponent(desc.replace(/\+/g, ' ')));
+        setLinkSent(false);
+      }
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
     // Check active sessions and sets the user
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -43,14 +59,21 @@ export default function AuthWrapper({ children }: { children: (user: AppUser) =>
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
-      }
+  const sendMagicLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || sending) return;
+    setSending(true);
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin },
     });
-    if (error) console.error('Error logging in with Supabase:', error.message);
+    setSending(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setLinkSent(true);
   };
 
   if (loading) {
@@ -90,13 +113,36 @@ export default function AuthWrapper({ children }: { children: (user: AppUser) =>
           </p>
           
           <div className="flex flex-col gap-4 w-full max-w-xs mx-auto">
-            <button
-              onClick={signInWithGoogle}
-              className="group relative flex items-center justify-center gap-3 w-full bg-zinc-900 text-cream-50 px-8 py-5 rounded-[2rem] font-medium transition-all hover:bg-zinc-800 active:scale-95 shadow-2xl shadow-zinc-900/20"
-            >
-              <span className="text-lg">Enter Studio</span>
-              <LogIn className="w-5 h-5 transition-transform group-hover:translate-x-1 text-rose-300" />
-            </button>
+            {linkSent ? (
+              <div className="bg-white border border-rose-100 rounded-[2rem] px-6 py-6 text-center shadow-xl shadow-rose-200/20">
+                <Mail className="w-8 h-8 text-rose-400 mx-auto mb-3" />
+                <p className="text-zinc-700 font-medium mb-1">Check your inbox</p>
+                <p className="text-zinc-500 text-sm">We sent a magic link to <span className="font-medium text-zinc-700">{email}</span>.</p>
+              </div>
+            ) : (
+              <form onSubmit={sendMagicLink} className="flex flex-col gap-3">
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  className="w-full bg-white border border-rose-100 rounded-[2rem] px-6 py-4 text-zinc-900 focus:outline-none focus:border-rose-300 focus:ring-4 focus:ring-rose-50 transition-all placeholder:text-zinc-300 shadow-sm text-center"
+                />
+                <button
+                  type="submit"
+                  disabled={sending}
+                  className="group relative flex items-center justify-center gap-3 w-full bg-zinc-900 text-cream-50 px-8 py-5 rounded-[2rem] font-medium transition-all hover:bg-zinc-800 active:scale-95 shadow-2xl shadow-zinc-900/20 disabled:opacity-60"
+                >
+                  <span className="text-lg">{sending ? 'Sending…' : 'Enter Studio'}</span>
+                  <LogIn className="w-5 h-5 transition-transform group-hover:translate-x-1 text-rose-300" />
+                </button>
+                {authError && (
+                  <p className="text-rose-500 text-sm text-center">{authError}</p>
+                )}
+              </form>
+            )}
 
             <button
                onClick={() => setGuestMode(true)}

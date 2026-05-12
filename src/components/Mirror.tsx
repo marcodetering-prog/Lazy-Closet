@@ -3,9 +3,7 @@ import { Camera, RefreshCw, X, Move, Layers, Sparkles, ArrowUp, ArrowDown, Plus,
 import { Item } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { GoogleGenAI } from '@google/genai';
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+import { chat } from '../lib/llm';
 
 export default function Mirror({ items }: { items: Item[] }) {
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -21,53 +19,61 @@ export default function Mirror({ items }: { items: Item[] }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (autoAlign && layerIds.length > 0) {
-      const CATEGORY_ORDER: Record<string, number> = {
-        'Dress': 1,
-        'Bottom': 2,
-        'Shoes': 3,
-        'Top': 4,
-        'Outerwear': 5,
-        'Accessory': 6,
-      };
-      
-      const newLayerIds = [...layerIds].sort((a, b) => {
-        const itemA = items.find(i => i.id === a);
-        const itemB = items.find(i => i.id === b);
-        return (CATEGORY_ORDER[itemA?.category || 'Top'] || 0) - (CATEGORY_ORDER[itemB?.category || 'Top'] || 0);
-      });
-      
-      setLayerIds(newLayerIds);
-      
-      const newPositions = { ...positions };
-      const newScales = { ...scales };
-      
-      newLayerIds.forEach(id => {
-        const item = items.find(i => i.id === id);
-        if (item) {
-          let top = '15%';
-          let left = '50%';
-          let x = '-50%';
-          let y = '0%';
-          let scale = 1;
-          
-          switch (item.category) {
-            case 'Top': top = '15%'; scale = 1.1; break;
-            case 'Outerwear': top = '12%'; scale = 1.35; break;
-            case 'Bottom': top = '50%'; scale = 1.0; break;
-            case 'Dress': top = '20%'; scale = 1.25; break;
-            case 'Shoes': top = '80%'; scale = 0.6; break;
-            case 'Accessory': top = '5%'; scale = 0.5; break;
-          }
-          newPositions[id] = { top, left, x, y };
-          newScales[id] = scale;
-        }
-      });
-      
-      setPositions(newPositions);
-      setScales(newScales);
+    if (!autoAlign || layerIds.length === 0) return;
+    const CATEGORY_ORDER: Record<string, number> = {
+      'Dress': 1,
+      'Bottom': 2,
+      'Shoes': 3,
+      'Top': 4,
+      'Outerwear': 5,
+      'Accessory': 6,
+    };
+    const sortedIds = [...layerIds].sort((a, b) => {
+      const itemA = items.find(i => i.id === a);
+      const itemB = items.find(i => i.id === b);
+      return (CATEGORY_ORDER[itemA?.category || 'Top'] || 0) - (CATEGORY_ORDER[itemB?.category || 'Top'] || 0);
+    });
+    // Avoid resetting layerIds (and re-firing this effect) when already sorted.
+    if (sortedIds.some((id, i) => id !== layerIds[i])) {
+      setLayerIds(sortedIds);
     }
-  }, [autoAlign]);
+    setPositions(prev => {
+      const next = { ...prev };
+      sortedIds.forEach(id => {
+        const item = items.find(i => i.id === id);
+        if (!item) return;
+        let top = '15%', left = '50%', x = '-50%', y = '0%';
+        switch (item.category) {
+          case 'Top': top = '15%'; break;
+          case 'Outerwear': top = '12%'; break;
+          case 'Bottom': top = '50%'; break;
+          case 'Dress': top = '20%'; break;
+          case 'Shoes': top = '80%'; break;
+          case 'Accessory': top = '5%'; break;
+        }
+        next[id] = { top, left, x, y };
+      });
+      return next;
+    });
+    setScales(prev => {
+      const next = { ...prev };
+      sortedIds.forEach(id => {
+        const item = items.find(i => i.id === id);
+        if (!item) return;
+        let scale = 1;
+        switch (item.category) {
+          case 'Top': scale = 1.1; break;
+          case 'Outerwear': scale = 1.35; break;
+          case 'Bottom': scale = 1.0; break;
+          case 'Dress': scale = 1.25; break;
+          case 'Shoes': scale = 0.6; break;
+          case 'Accessory': scale = 0.5; break;
+        }
+        next[id] = scale;
+      });
+      return next;
+    });
+  }, [autoAlign, layerIds, items]);
 
   const startCamera = async () => {
     try {
@@ -156,36 +162,25 @@ export default function Mirror({ items }: { items: Item[] }) {
   };
 
   const analyzeLook = async () => {
-    if (!videoRef.current) return;
+    const layered = layerIds
+      .map(id => items.find(i => i.id === id))
+      .filter(Boolean) as Item[];
+    if (layered.length === 0) {
+      setAnalysisResult('Add at least one piece to the mirror first.');
+      return;
+    }
     setAnalysisLoading(true);
     setAnalysisResult(null);
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(-1, 1);
-        ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        const base64Data = dataUrl.split(',')[1];
+      const list = layered
+        .map(it => `- ${it.name} (${it.category}${it.color ? `, ${it.color}` : ''})`)
+        .join('\n');
+      const prompt = `You are Aether, a sophisticated AI stylist. The user has layered the following pieces on themselves in the virtual mirror:
+${list}
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { inlineData: { data: base64Data, mimeType: 'image/jpeg' } },
-                { text: 'Analyze this look. Break down the color palette, mention the seasonality (e.g. Autumn/Winter), and give a 1 sentence style tip or compliment. Be extremely concise, chic, and sophisticated.' }
-              ]
-            }
-          ]
-        });
-        
-        setAnalysisResult(response.text || 'Unable to formulate an opinion.');
-      }
+Break down the color palette, name the season this works for (e.g. Autumn/Winter), and give one short chic style tip. Be extremely concise — 2-3 short sentences total.`;
+      const reply = await chat([{ role: 'user', content: prompt }], { maxTokens: 200 });
+      setAnalysisResult(reply || 'Unable to formulate an opinion.');
     } catch(e) {
       console.error(e);
       setAnalysisResult('The stylist connection fluttered. Try again.');
