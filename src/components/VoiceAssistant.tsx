@@ -11,7 +11,7 @@ interface VoiceAssistantProps {
   onSearch?: (query: string) => void;
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: "browser-no-key", httpOptions: { baseUrl: window.location.origin + "/api/genai" } });
 
 export default function VoiceAssistant({ items, onNavigate }: VoiceAssistantProps) {
   const [isActive, setIsActive] = useState(false);
@@ -157,10 +157,12 @@ ${itemsSummary || 'Wardrobe is empty.'}`;
     }
   };
 
-  // Auto-clear error
-  if (error) {
-    setTimeout(() => setError(null), 4000);
-  }
+  // Auto-clear error after 4s
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 4000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   return (
     <div className="fixed bottom-24 right-8 z-50 md:bottom-8 flex flex-col items-end gap-4">

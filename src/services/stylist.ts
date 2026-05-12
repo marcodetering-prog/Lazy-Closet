@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Item } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: "browser-no-key", httpOptions: { baseUrl: window.location.origin + "/api/genai" } });
 
 export const stylistService = {
   async getOutfitSuggestions(items: Item[], occasion: string, weather?: string) {
