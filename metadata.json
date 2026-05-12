@@ -1,0 +1,14 @@
+{
+  "name": "Lazy Closet",
+  "description": "A chic digital wardrobe that effortlessly organizes your clothes and suggests perfect outfits using AI.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI Stylist",
+    "Digital Wardrobe",
+    "Outfit Recommendations"
+  ]
+}

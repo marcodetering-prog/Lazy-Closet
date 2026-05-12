@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "Item": {
+      "title": "Clothing Item",
+      "description": "An individual piece of clothing in the wardrobe.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["Top", "Bottom", "Dress", "Outerwear", "Shoes", "Accessory"] },
+        "color": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "lastWorn": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "category", "ownerId", "imageUrl"]
+    },
+    "Outfit": {
+      "title": "Outfit",
+      "description": "A combination of clothing items.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "itemIds": { "type": "array", "items": { "type": "string" } },
+        "ownerId": { "type": "string" },
+        "occasion": { "type": "string" },
+        "weatherType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "itemIds", "ownerId"]
+    }
+  },
+  "firestore": {
+    "items": {
+      "schema": "Item",
+      "description": "Collection of clothing items"
+    },
+    "outfits": {
+      "schema": "Outfit",
+      "description": "Collection of suggested or saved outfits"
+    }
+  }
+}
