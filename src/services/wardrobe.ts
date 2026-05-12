@@ -1,21 +1,8 @@
-import { 
-  collection, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  query, 
-  where, 
-  getDocs,
-  onSnapshot,
-  serverTimestamp,
-  Timestamp
-} from 'firebase/firestore';
-import { getDb, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { Item, Outfit } from '../types';
 
-const ITEMS_COLLECTION = 'items';
-const OUTFITS_COLLECTION = 'outfits';
+const ITEMS_TABLE = 'items';
+const OUTFITS_TABLE = 'outfits';
 
 // Local storage fallback for demo/unconfigured state
 const localStore = {
@@ -25,99 +12,124 @@ const localStore = {
 
 export const wardrobeService = {
   async addItem(item: Omit<Item, 'id' | 'createdAt'>) {
-    const db = getDb();
-    if (!db) {
+    const { data, error } = await supabase
+      .from(ITEMS_TABLE)
+      .insert([{
+        ...item,
+        createdAt: new Date().toISOString()
+      }])
+      .select();
+
+    if (error) {
+      console.error('Error adding item to Supabase:', error.message);
+      // Fallback to local storage if needed
       const items = localStore.getItems();
       const newItem = { ...item, id: Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString() } as Item;
       localStore.setItems([...items, newItem]);
       return newItem.id;
     }
-    try {
-      const docRef = await addDoc(collection(db, ITEMS_COLLECTION), {
-        ...item,
-        createdAt: serverTimestamp(),
-      });
-      return docRef.id;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, ITEMS_COLLECTION);
-    }
+    return data[0].id;
   },
 
   async getItems(userId: string) {
-    const db = getDb();
-    if (!db) return localStore.getItems();
-    try {
-      const q = query(collection(db, ITEMS_COLLECTION), where('ownerId', '==', userId));
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Item[];
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, ITEMS_COLLECTION);
-      return [];
+    const { data, error } = await supabase
+      .from(ITEMS_TABLE)
+      .select('*')
+      .eq('ownerId', userId);
+
+    if (error) {
+      console.error('Error fetching items from Supabase:', error.message);
+      return localStore.getItems();
     }
+    return data as Item[];
   },
 
   subscribeToItems(userId: string, callback: (items: Item[]) => void) {
-    const db = getDb();
-    if (!db) {
-      const items = localStore.getItems();
-      callback(items);
-      // Simple poll for local storage changes in other tabs
-      const interval = setInterval(() => callback(localStore.getItems()), 2000);
-      return () => clearInterval(interval);
-    }
-    const q = query(collection(db, ITEMS_COLLECTION), where('ownerId', '==', userId));
-    return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Item[];
-      callback(items);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, ITEMS_COLLECTION);
-    });
+    // Initial fetch
+    this.getItems(userId).then(callback);
+
+    // Subscribe to changes
+    const channel = supabase
+      .channel('items_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: ITEMS_TABLE,
+          filter: `ownerId=eq.${userId}`
+        },
+        () => {
+          this.getItems(userId).then(callback);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   },
 
   async deleteItem(itemId: string) {
-    const db = getDb();
-    if (!db) {
+    const { error } = await supabase
+      .from(ITEMS_TABLE)
+      .delete()
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Error deleting item from Supabase:', error.message);
       const items = localStore.getItems().filter(i => i.id !== itemId);
       localStore.setItems(items);
-      return;
-    }
-    try {
-      await deleteDoc(doc(db, ITEMS_COLLECTION, itemId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${ITEMS_COLLECTION}/${itemId}`);
     }
   },
 
   async addOutfit(outfit: Omit<Outfit, 'id' | 'createdAt'>) {
-    const db = getDb();
-    if (!db) {
-       console.log('No DB, skipping outfit save');
-       return 'local-id-' + Math.random();
-    }
-    try {
-      const docRef = await addDoc(collection(db, OUTFITS_COLLECTION), {
+    const { data, error } = await supabase
+      .from(OUTFITS_TABLE)
+      .insert([{
         ...outfit,
-        createdAt: new Date().toISOString(), // Use ISO string to make parsing out easy
-      });
-      return docRef.id;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, OUTFITS_COLLECTION);
+        createdAt: new Date().toISOString()
+      }])
+      .select();
+
+    if (error) {
+      console.error('Error adding outfit to Supabase:', error.message);
+      return 'local-id-' + Math.random();
     }
+    return data[0].id;
   },
 
   subscribeToOutfits(userId: string, callback: (outfits: Outfit[]) => void) {
-    const db = getDb();
-    if (!db) {
-      callback([]);
-      return () => {};
-    }
-    const q = query(collection(db, OUTFITS_COLLECTION), where('ownerId', '==', userId));
-    return onSnapshot(q, (snapshot) => {
-      const outfits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Outfit[];
-      outfits.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(outfits);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, OUTFITS_COLLECTION);
-    });
+    const fetchOutfits = async () => {
+      const { data, error } = await supabase
+        .from(OUTFITS_TABLE)
+        .select('*')
+        .eq('ownerId', userId)
+        .order('createdAt', { ascending: false });
+
+      if (!error) {
+        callback(data as Outfit[]);
+      }
+    };
+
+    fetchOutfits();
+
+    const channel = supabase
+      .channel('outfits_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: OUTFITS_TABLE,
+          filter: `ownerId=eq.${userId}`
+        },
+        fetchOutfits
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }
 };

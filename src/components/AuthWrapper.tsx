@@ -1,27 +1,57 @@
 import { useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { getFbAuth, signInWithGoogle } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
+import { AppUser } from '../types';
 import { LogIn, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 
-export default function AuthWrapper({ children }: { children: (user: User) => React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+export default function AuthWrapper({ children }: { children: (user: AppUser) => React.ReactNode }) {
+  const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
-
   const [guestMode, setGuestMode] = useState(false);
 
   useEffect(() => {
-    const auth = getFbAuth();
-    if (!auth) {
+    // Check active sessions and sets the user
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser({
+          uid: session.user.id,
+          email: session.user.email || null,
+          displayName: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'User',
+          photoURL: session.user.user_metadata.avatar_url || null,
+        });
+      }
       setLoading(false);
-      return;
-    }
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
+    };
+
+    checkUser();
+
+    // Listen for changes on auth state (sign in, sign out, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser({
+          uid: session.user.id,
+          email: session.user.email || null,
+          displayName: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'User',
+          photoURL: session.user.user_metadata.avatar_url || null,
+        });
+      } else {
+        setUser(null);
+      }
     });
-    return () => unsubscribe();
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+    if (error) console.error('Error logging in with Supabase:', error.message);
+  };
 
   if (loading) {
     return (
@@ -36,29 +66,8 @@ export default function AuthWrapper({ children }: { children: (user: User) => Re
     );
   }
 
-  if (!getFbAuth() && !guestMode) {
-    return (
-      <div className="min-h-screen bg-cream-50 flex flex-col items-center justify-center p-6 text-center">
-        <Sparkles className="w-12 h-12 text-rose-300 mb-6 animate-pulse" />
-        <h1 className="text-5xl font-serif text-zinc-900 mb-4">Aether</h1>
-        <p className="text-zinc-500 max-w-sm mb-8 font-light text-lg">
-          We encountered a connection issue. You can still step into the boutique in offline mode.
-        </p>
-        <button
-          onClick={() => setGuestMode(true)}
-          className="btn-primary mb-6"
-        >
-          Enter Anonymous Session
-        </button>
-        <div className="p-4 bg-white rounded-2xl border border-rose-100 shadow-sm text-[10px] text-rose-400 uppercase tracking-widest font-bold">
-          Offline Mode
-        </div>
-      </div>
-    );
-  }
-
   if (guestMode) {
-    return <>{children({ uid: 'guest-user', displayName: 'Guest', email: 'guest@example.com', photoURL: null } as User)}</>;
+    return <>{children({ uid: 'guest-user', displayName: 'Guest', email: 'guest@example.com', photoURL: null })}</>;
   }
 
   if (!user) {
@@ -80,13 +89,22 @@ export default function AuthWrapper({ children }: { children: (user: User) => Re
             Your personal digital atelier and AI stylist for effortless elegance.
           </p>
           
-          <button
-            onClick={() => signInWithGoogle().catch(console.error)}
-            className="group relative flex items-center justify-center gap-3 w-full max-w-xs mx-auto bg-zinc-900 text-cream-50 px-8 py-5 rounded-[2rem] font-medium transition-all hover:bg-zinc-800 active:scale-95 shadow-2xl shadow-zinc-900/20"
-          >
-            <span className="text-lg">Enter Studio</span>
-            <LogIn className="w-5 h-5 transition-transform group-hover:translate-x-1 text-rose-300" />
-          </button>
+          <div className="flex flex-col gap-4 w-full max-w-xs mx-auto">
+            <button
+              onClick={signInWithGoogle}
+              className="group relative flex items-center justify-center gap-3 w-full bg-zinc-900 text-cream-50 px-8 py-5 rounded-[2rem] font-medium transition-all hover:bg-zinc-800 active:scale-95 shadow-2xl shadow-zinc-900/20"
+            >
+              <span className="text-lg">Enter Studio</span>
+              <LogIn className="w-5 h-5 transition-transform group-hover:translate-x-1 text-rose-300" />
+            </button>
+
+            <button
+               onClick={() => setGuestMode(true)}
+               className="text-zinc-400 hover:text-rose-500 text-sm font-medium transition-colors"
+            >
+              Try Preview Mode
+            </button>
+          </div>
         </motion.div>
       </div>
     );

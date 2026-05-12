@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
 import { Shirt, Sparkles, User as UserIcon, LogOut, Home, Camera } from 'lucide-react';
 import AuthWrapper from './components/AuthWrapper';
 import Wardrobe from './components/Wardrobe';
@@ -8,8 +7,8 @@ import Dashboard from './components/Dashboard';
 import Mirror from './components/Mirror';
 import VoiceAssistant from './components/VoiceAssistant';
 import { wardrobeService } from './services/wardrobe';
-import { Item } from './types';
-import { getFbAuth } from './lib/firebase';
+import { Item, AppUser } from './types';
+import { supabase } from './lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 
@@ -23,7 +22,7 @@ export default function App() {
   );
 }
 
-function MainApp({ user }: { user: User }) {
+function MainApp({ user }: { user: AppUser }) {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [items, setItems] = useState<Item[]>([]);
 
@@ -35,8 +34,7 @@ function MainApp({ user }: { user: User }) {
   }, [user.uid]);
 
   const handleLogout = () => {
-    const auth = getFbAuth();
-    auth?.signOut();
+    supabase.auth.signOut();
   };
 
   return (
