@@ -3,15 +3,13 @@ import { Mic, MicOff, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { Item } from '../types';
-import { GoogleGenAI } from '@google/genai';
+import { chat } from '../lib/llm';
 
 interface VoiceAssistantProps {
   items: Item[];
   onNavigate: (tab: any) => void;
   onSearch?: (query: string) => void;
 }
-
-const ai = new GoogleGenAI({ apiKey: "browser-no-key", httpOptions: { baseUrl: window.location.origin + "/api/genai" } });
 
 export default function VoiceAssistant({ items, onNavigate }: VoiceAssistantProps) {
   const [isActive, setIsActive] = useState(false);
@@ -136,18 +134,13 @@ Keep your answers extremely brief, conversational, and fashion-forward. 1-2 shor
 Current wardrobe context:
 ${itemsSummary || 'Wardrobe is empty.'}`;
 
-      const contents = newMessages.map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
+      const chatMessages = newMessages.map(m => ({
+        role: m.role === 'model' ? ('assistant' as const) : ('user' as const),
+        content: m.text,
       }));
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents,
-        config: { systemInstruction }
-      });
-
-      const reply = response.text || "I was unable to process that.";
+      const reply = (await chat(chatMessages, { systemInstruction, maxTokens: 200 }))
+        || "I was unable to process that.";
       setMessages([...newMessages, { role: 'model', text: reply }]);
       speakAndListen(reply);
 

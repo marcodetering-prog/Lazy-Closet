@@ -15,9 +15,7 @@ import { wardrobeService } from '../services/wardrobe';
 import { Item, Category } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { GoogleGenAI } from '@google/genai';
-
-const ai = new GoogleGenAI({ apiKey: "browser-no-key", httpOptions: { baseUrl: window.location.origin + "/api/genai" } });
+import { chatJson } from '../lib/llm';
 
 
 const CATEGORIES: Category[] = ['Top', 'Bottom', 'Dress', 'Outerwear', 'Shoes', 'Accessory'];
@@ -190,25 +188,17 @@ Respond exactly as JSON with two keys:
 1. "itemIds": an array of strings representing the IDs of the matched items.
 2. "advice": a short 1-sentence chic styling tip on why these work together.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt
-      });
-
-      const txt = response.text || '';
-      const match = txt.match(/\{[\s\S]*\}/);
-      if (match) {
-         try {
-           const json = JSON.parse(match[0]);
-           if (json.itemIds) {
-             const matches = json.itemIds.map((id: string) => allItems.find(i => i.id === id)).filter(Boolean);
-             setMatchedItems(matches);
-           }
-           if (json.advice) {
-             setStyleAdvice(json.advice);
-           }
-         } catch(e) {}
+      const json = await chatJson<{ itemIds?: string[]; advice?: string }>(
+        [{ role: 'user', content: prompt }],
+        { maxTokens: 300 }
+      );
+      if (json?.itemIds) {
+        const matches = json.itemIds
+          .map((id: string) => allItems.find(i => i.id === id))
+          .filter(Boolean) as Item[];
+        setMatchedItems(matches);
       }
+      if (json?.advice) setStyleAdvice(json.advice);
     } catch(e) {
       console.error("Match failed", e);
     } finally {
@@ -290,55 +280,19 @@ function AddItemModal({ userId, onClose }: { userId: string, onClose: () => void
   const [category, setCategory] = useState<Category>('Top');
   const [imageUrl, setImageUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [imageMode, setImageMode] = useState<'url' | 'upload'>('upload');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const analyzeImage = async (dataUrl: string) => {
-    setIsAnalyzing(true);
-    try {
-      const base64Data = dataUrl.split(',')[1];
-      const mimeType = dataUrl.split(';')[0].split(':')[1];
-      
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { inlineData: { data: base64Data, mimeType } },
-              { text: 'Analyze this clothing item. Respond as JSON with exactly two keys: "name" (a chic, precise name like "Vintage Navy Blazer") and "category" (must be strictly one of: "Top", "Bottom", "Outerwear", "Dress", "Shoes", "Accessory"). Do not use markdown blocks, just the JSON string.' }
-            ]
-          }
-        ]
-      });
-      
-      const txt = response.text || '';
-      const match = txt.match(/\{[\s\S]*\}/);
-      if (match) {
-         try {
-           const json = JSON.parse(match[0]);
-           if (json.name) setName(json.name);
-           if (json.category && CATEGORIES.includes(json.category)) setCategory(json.category as Category);
-         } catch(e) {}
-      }
-    } catch(e) {
-      console.error("AI Analysis failed", e);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
+  // Vision-based auto-fill is disabled while the LLM proxy is text-only
+  // (DeepSeek). The user fills in name + category manually.
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const result = reader.result as string;
-        setImageUrl(result);
-        analyzeImage(result);
+        setImageUrl(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -463,12 +417,6 @@ function AddItemModal({ userId, onClose }: { userId: string, onClose: () => void
                          <Trash2 className="w-4 h-4" />
                        </button>
                     </div>
-                    {isAnalyzing && (
-                       <div className="absolute bottom-2 left-2 right-2 bg-white/90 backdrop-blur-sm rounded-xl py-2 px-3 flex items-center justify-center gap-2 shadow-sm border border-rose-100">
-                          <Sparkles className="w-3 h-3 text-rose-400 animate-pulse" />
-                          <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Auto-tagging...</span>
-                       </div>
-                    )}
                   </div>
                 ) : (
                   <div className="flex gap-4 w-full">

@@ -3,9 +3,7 @@ import { Camera, RefreshCw, X, Move, Layers, Sparkles, ArrowUp, ArrowDown, Plus,
 import { Item } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { GoogleGenAI } from '@google/genai';
-
-const ai = new GoogleGenAI({ apiKey: "browser-no-key", httpOptions: { baseUrl: window.location.origin + "/api/genai" } });
+import { chat } from '../lib/llm';
 
 export default function Mirror({ items }: { items: Item[] }) {
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -164,36 +162,25 @@ export default function Mirror({ items }: { items: Item[] }) {
   };
 
   const analyzeLook = async () => {
-    if (!videoRef.current) return;
+    const layered = layerIds
+      .map(id => items.find(i => i.id === id))
+      .filter(Boolean) as Item[];
+    if (layered.length === 0) {
+      setAnalysisResult('Add at least one piece to the mirror first.');
+      return;
+    }
     setAnalysisLoading(true);
     setAnalysisResult(null);
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.scale(-1, 1);
-        ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        const base64Data = dataUrl.split(',')[1];
+      const list = layered
+        .map(it => `- ${it.name} (${it.category}${it.color ? `, ${it.color}` : ''})`)
+        .join('\n');
+      const prompt = `You are Aether, a sophisticated AI stylist. The user has layered the following pieces on themselves in the virtual mirror:
+${list}
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { inlineData: { data: base64Data, mimeType: 'image/jpeg' } },
-                { text: 'Analyze this look. Break down the color palette, mention the seasonality (e.g. Autumn/Winter), and give a 1 sentence style tip or compliment. Be extremely concise, chic, and sophisticated.' }
-              ]
-            }
-          ]
-        });
-        
-        setAnalysisResult(response.text || 'Unable to formulate an opinion.');
-      }
+Break down the color palette, name the season this works for (e.g. Autumn/Winter), and give one short chic style tip. Be extremely concise — 2-3 short sentences total.`;
+      const reply = await chat([{ role: 'user', content: prompt }], { maxTokens: 200 });
+      setAnalysisResult(reply || 'Unable to formulate an opinion.');
     } catch(e) {
       console.error(e);
       setAnalysisResult('The stylist connection fluttered. Try again.');
